@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Set OpenAI API key
 openai.api_key = st.secrets['OPENAI_API_KEY']
-APIFY_API_KEY = st.secretes['APIFY_API_KEY']
+APIFY_API_KEY = st.secrets['APIFY_API_KEY']
 
 a_client = ApifyClient(APIFY_API_KEY)
 
