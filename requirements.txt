@@ -2,4 +2,4 @@ moviepy
 openai
 tenacity
 apify-client
-
+opencv-python
