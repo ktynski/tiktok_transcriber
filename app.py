@@ -4,7 +4,6 @@ import json
 import os
 from urllib.request import Request, urlopen, urlretrieve
 from apify_client import ApifyClient
-import cv2
 import base64
 import requests
 import openai
