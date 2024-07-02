@@ -3,3 +3,4 @@ openai
 tenacity
 apify-client
 opencv-python
+numpy
