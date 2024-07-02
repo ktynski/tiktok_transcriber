@@ -124,6 +124,7 @@ def transcribe_audio_with_whisper(audio_path):
 
 def get_video_url(video_data):
     video_url = video_data.get('aweme_info_video_download_addr_url_list')
+    st.write(video_url)
     if isinstance(video_url, list):
         video_url = video_url[0]
     elif isinstance(video_url, str):
@@ -148,6 +149,7 @@ def process_video(video_data):
         # Extract audio
         video = mp.VideoFileClip(video_path)
         audio_path = f"audio_{video_data['original_index']}.wav"
+        st.write(audio_path)
         video.audio.write_audiofile(audio_path, verbose=False, logger=None)
 
         # Transcribe audio
