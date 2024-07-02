@@ -37,7 +37,7 @@ def flatten_dict(d, parent_key='', sep='_'):
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10))
 def fetch_video_metadata(keyword, num_videos, publish_time, extra_videos=2):
-    logger.info(f"Fetching video metadata for keyword: {keyword}, num_videos: {num_videos}")
+    st.write(f"Fetching video metadata for keyword: {keyword}, num_videos: {num_videos}")
     try:
         with st.spinner("Fetching video metadata..."):
             run_input = {
@@ -50,25 +50,25 @@ def fetch_video_metadata(keyword, num_videos, publish_time, extra_videos=2):
                 "type": "SEARCH",
             }
             run = a_client.actor("nCNiU9QG1e0nMwgWj").call(run_input=run_input)
-            logger.info(f"Apify actor run initiated: {run['id']}")
+            st.write(f"Apify actor run initiated: {run['id']}")
             url = f'https://api.apify.com/v2/actor-runs/{run["id"]}?waitForFinish='
 
             request = Request(url)
             response_body = urlopen(request, timeout=60).read()
             run_details = json.loads(response_body)
-            logger.info(f"Apify run details received: {run_details.get('status')}")
+            st.write(f"Apify run details received: {run_details.get('status')}")
 
             if "defaultDatasetId" not in run:
-                logger.error("No dataset ID found in the run details.")
+                st.write("No dataset ID found in the run details.")
                 st.error("No dataset ID found in the run details.")
                 return None
 
             total_items = max(run_details.get("itemCount", 1), 1)
-            logger.info(f"Total items in dataset: {total_items}")
+            st.write(f"Total items in dataset: {total_items}")
 
             items = list(a_client.dataset(run["defaultDatasetId"]).iterate_items())
             if not items:
-                logger.warning("No items found in the dataset.")
+                st.write("No items found in the dataset.")
                 st.warning("No items found in the dataset.")
                 return None
 
@@ -78,21 +78,21 @@ def fetch_video_metadata(keyword, num_videos, publish_time, extra_videos=2):
                     flat_record = flatten_dict(item)
                     data.append(flat_record)
                 else:
-                    logger.warning(f"Item {idx + 1} is not a dictionary and will be skipped.")
+                    st.write(f"Item {idx + 1} is not a dictionary and will be skipped.")
                     st.warning(f"Item {idx + 1} is not a dictionary and will be skipped.")
 
             df = pd.DataFrame(data)
             df['original_index'] = df.index
-            logger.info(f"Metadata fetched successfully. Total videos: {len(df)}")
+            st.write(f"Metadata fetched successfully. Total videos: {len(df)}")
             return df.head(num_videos)
     except Exception as e:
-        logger.error(f"Error fetching video metadata: {e}")
+        st.write(f"Error fetching video metadata: {e}")
         st.error(f"Error fetching video metadata. Please try again.")
         return None
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10))
 def download_video(video_url, video_path):
-    logger.info(f"Attempting to download video from {video_url}")
+    st.write(f"Attempting to download video from {video_url}")
     try:
         if video_url and isinstance(video_url, str):
             response = requests.get(video_url, stream=True)
@@ -102,17 +102,17 @@ def download_video(video_url, video_path):
                     file.write(chunk)
             if not os.path.exists(video_path):
                 raise FileNotFoundError(f"Failed to download video from {video_url}")
-            logger.info(f"Video successfully downloaded to {video_path}")
+            st.write(f"Video successfully downloaded to {video_path}")
         else:
-            logger.warning(f"Invalid video URL: {video_url}")
+            st.write(f"Invalid video URL: {video_url}")
             raise ValueError(f"Invalid video URL: {video_url}")
     except Exception as e:
-        logger.error(f"Error downloading video: {e}")
+        st.write(f"Error downloading video: {e}")
         raise e
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10))
 def transcribe_audio_with_whisper(audio_path):
-    logger.info(f"Transcribing audio from {audio_path}")
+    st.write(f"Transcribing audio from {audio_path}")
     try:
         with open(audio_path, "rb") as audio_file:
             transcript = openai.audio.transcriptions.create(
@@ -120,21 +120,21 @@ def transcribe_audio_with_whisper(audio_path):
                 file=audio_file,
                 response_format="text"
             )
-        logger.info(f"Transcription completed for {audio_path}")
+        st.write(f"Transcription completed for {audio_path}")
         return transcript
     except Exception as e:
-        logger.error(f"Error transcribing audio with Whisper: {e}")
+        st.write(f"Error transcribing audio with Whisper: {e}")
         return ""
 
 def get_video_url(video_data):
-    logger.info(f"Extracting video URL for video {video_data['original_index']}")
+    st.write(f"Extracting video URL for video {video_data['original_index']}")
     video_url = video_data.get('aweme_info_video_download_addr_url_list')
     
     if isinstance(video_url, (list, np.ndarray)):
         if len(video_url) > 0:
             video_url = video_url[0]
         else:
-            logger.warning(f"Empty video URL list for video {video_data['original_index']}")
+            st.write(f"Empty video URL list for video {video_data['original_index']}")
             return None
     elif isinstance(video_url, str):
         try:
@@ -144,18 +144,18 @@ def get_video_url(video_data):
         except json.JSONDecodeError:
             pass  # Keep the original string if it's not valid JSON
     elif pd.isna(video_url) or video_url is None:
-        logger.warning(f"Invalid video URL for video {video_data['original_index']}")
+        st.write(f"Invalid video URL for video {video_data['original_index']}")
         return None
     
     if not isinstance(video_url, str):
-        logger.warning(f"Unexpected video URL type for video {video_data['original_index']}: {type(video_url)}")
+        st.write(f"Unexpected video URL type for video {video_data['original_index']}: {type(video_url)}")
         return None
     
-    logger.info(f"Extracted video URL: {video_url}")
+    st.write(f"Extracted video URL: {video_url}")
     return video_url
 
 def process_video(video_data):
-    logger.info(f"Processing video: {video_data['original_index']}")
+    st.write(f"Processing video: {video_data['original_index']}")
     try:
         video_url = get_video_url(video_data)
         if not video_url:
@@ -171,13 +171,13 @@ def process_video(video_data):
 
         # Extract audio
         try:
-            logger.info(f"Extracting audio from {video_path}")
+            st.write(f"Extracting audio from {video_path}")
             video = mp.VideoFileClip(video_path)
             audio_path = f"audio_{video_data['original_index']}.wav"
             video.audio.write_audiofile(audio_path, verbose=False, logger=None)
-            logger.info(f"Audio extracted to {audio_path}")
+            st.write(f"Audio extracted to {audio_path}")
         except Exception as e:
-            logger.warning(f"Error extracting audio: {str(e)}")
+            st.write(f"Error extracting audio: {str(e)}")
             raise
 
         # Transcribe audio
@@ -187,18 +187,18 @@ def process_video(video_data):
         video.close()
         os.remove(video_path)
         os.remove(audio_path)
-        logger.info(f"Temporary files cleaned up for video {video_data['original_index']}")
+        st.write(f"Temporary files cleaned up for video {video_data['original_index']}")
 
-        logger.info(f"Video processing completed for {video_data['original_index']}")
+        st.write(f"Video processing completed for {video_data['original_index']}")
         return {"URL": video_url, "Transcript": transcription}
     except Exception as e:
-        logger.error(f"Error processing video {video_data['original_index']}: {str(e)}")
-        logger.error(f"Video data: {video_data}")
+        st.write(f"Error processing video {video_data['original_index']}: {str(e)}")
+        st.write(f"Video data: {video_data}")
         return {"URL": video_url if 'video_url' in locals() else "Unknown", "Transcript": f"Error: {str(e)}"}
 
         
 def process_videos_concurrently(metadata_df):
-    logger.info(f"Starting concurrent processing of {len(metadata_df)} videos")
+    st.write(f"Starting concurrent processing of {len(metadata_df)} videos")
     results = []
     total_videos = len(metadata_df)
     
@@ -209,15 +209,15 @@ def process_videos_concurrently(metadata_df):
             try:
                 result = future.result()
                 results.append(result)
-                logger.info(f"Completed processing video {i+1}/{total_videos}")
+                st.write(f"Completed processing video {i+1}/{total_videos}")
             except Exception as e:
-                logger.error(f"Error processing video {i+1}/{total_videos}: {str(e)}")
+                st.write(f"Error processing video {i+1}/{total_videos}: {str(e)}")
     
     # Update progress outside of the thread
     for i in range(total_videos):
         st.progress((i + 1) / total_videos)
     
-    logger.info(f"Concurrent processing completed. Total results: {len(results)}")
+    st.write(f"Concurrent processing completed. Total results: {len(results)}")
     return results
 
 def main():
@@ -233,10 +233,10 @@ def main():
             st.warning("Please enter a keyword.")
             return
 
-        logger.info(f"Starting transcription process for keyword: {keyword}, num_videos: {num_videos}")
+        st.write(f"Starting transcription process for keyword: {keyword}, num_videos: {num_videos}")
         metadata_df = fetch_video_metadata(keyword, num_videos, publish_time)
         if metadata_df is None or metadata_df.empty:
-            logger.warning("No metadata retrieved or empty dataframe returned")
+            st.write("No metadata retrieved or empty dataframe returned")
             return
 
         st.subheader("Video Metadata")
@@ -254,7 +254,7 @@ def main():
             'aweme_info_statistics_play_count': 'Play Count'
         }
         st.dataframe(metadata_df[relevant_columns].rename(columns=display_names))
-        logger.info("Metadata displayed in Streamlit app")
+        st.write("Metadata displayed in Streamlit app")
 
         st.write(f"Processing {len(metadata_df)} videos. This may take a while...")
         transcripts = process_videos_concurrently(metadata_df)
@@ -263,12 +263,12 @@ def main():
             df = pd.DataFrame(transcripts)
             st.subheader("Transcription Results")
             st.dataframe(df)
-            logger.info("Transcription results displayed in Streamlit app")
+            st.write("Transcription results displayed in Streamlit app")
         else:
             st.warning("No transcripts were generated. Please check the URLs and try again.")
-            logger.warning("No transcripts generated")
+            st.write("No transcripts generated")
 
 if __name__ == "__main__":
-    logger.info("Application started")
+    st.write("Application started")
     main()
-    logger.info("Application finished")
+    st.write("Application finished")
