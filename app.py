@@ -73,7 +73,7 @@ def fetch_video_metadata(keyword, num_videos, publish_time, extra_videos=2):
             data = []
             for idx, item in enumerate(items):
                 progress = (idx + 1) / total_items
-                progress_bar.progress(min(progress, 1.0))
+                progress_bar.progress(progress)
                 if isinstance(item, dict):
                     flat_record = flatten_dict(item)
                     data.append(flat_record)
