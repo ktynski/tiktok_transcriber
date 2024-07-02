@@ -1,0 +1,6 @@
+moviepy
+openai
+tenacity
+apify-client
+cv2
+urllib
