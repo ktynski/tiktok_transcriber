@@ -1,6 +1,2 @@
-moviepy
 openai
-tenacity
-apify-client
-opencv-python
-numpy
+pyktok
