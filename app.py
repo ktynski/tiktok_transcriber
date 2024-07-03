@@ -2,10 +2,8 @@ import streamlit as st
 import pandas as pd
 import os
 import logging
-import moviepy.editor as mp
 import openai
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tenacity import retry, stop_after_attempt, wait_exponential
 import pyktok as pyk
 import re
 import glob
