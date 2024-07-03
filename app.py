@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 openai.api_key = st.secrets['OPENAI_API_KEY']
 
 # Set Streamlit page configuration
-st.set_page_config(page_title="TikTok Video Transcription", layout="wide")
+st.set_page_config(page_title="TikTok Video Transcriptionasdfasdf", layout="wide")
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10))
