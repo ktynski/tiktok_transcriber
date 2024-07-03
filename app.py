@@ -18,64 +18,62 @@ logger = logging.getLogger(__name__)
 openai.api_key = st.secrets['OPENAI_API_KEY']
 
 # Set Streamlit page configuration
-st.set_page_config(page_title="TikTok Video Transcriptionasdfasdf", layout="wide")
+st.set_page_config(page_title="TikTok Video Transcription", layout="wide")
 
-
+# Workaround for DBUS_SESSION_BUS_ADDRESS error
 if 'DBUS_SESSION_BUS_ADDRESS' not in os.environ:
     os.environ['DBUS_SESSION_BUS_ADDRESS'] = 'unix:path=/run/user/1000/bus'
-
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10))
 def transcribe_audio_with_whisper(audio_path):
     logger.info(f"Transcribing audio from {audio_path}")
     try:
         with open(audio_path, "rb") as audio_file:
-            transcript = openai.audio.transcriptions.create(
+            response = openai.Audio.transcribe(
                 model="whisper-1",
                 file=audio_file,
                 response_format="text"
             )
         logger.info(f"Transcription completed for {audio_path}")
-        return transcript
+        return response['text']
     except Exception as e:
         logger.error(f"Error transcribing audio with Whisper: {e}")
         return ""
 
-def get_latest_video_file():
-    list_of_files = glob.glob('*.mp4')
-    if not list_of_files:
+def download_video_in_memory(url):
+    response = requests.get(url, stream=True)
+    if response.status_code == 200:
+        video_data = io.BytesIO(response.content)
+        return video_data
+    else:
+        logger.error(f"Error downloading video from URL: {url}")
         return None
-    latest_file = max(list_of_files, key=os.path.getctime)
-    return latest_file
+
+def process_video_in_memory(video_data):
+    video = mp.VideoFileClip(video_data)
+    audio_data = io.BytesIO()
+    video.audio.write_audiofile(audio_data, verbose=False, logger=None)
+    return audio_data
 
 def download_and_process_video(url, browser_name='chrome'):
     try:
         # Specify browser for Pyktok
         pyk.specify_browser(browser_name)
 
-        # Download video using Pyktok
-        video_data_path = 'video_data.csv'
-        pyk.save_tiktok(url, True, video_data_path, browser_name)
-        
-        # Determine video path based on the most recently created .mp4 file
-        video_path = get_latest_video_file()
-        
-        if not video_path or not os.path.exists(video_path):
+        # Download video using Pyktok and get video URL
+        video_metadata = pyk.get_tiktok_json(url)
+        video_url = video_metadata['videoData']['itemInfos']['video']['urls'][0]
+
+        # Download video in memory
+        video_data = download_video_in_memory(video_url)
+        if video_data is None:
             raise FileNotFoundError(f"Video file not found after download for URL: {url}")
 
-        # Extract audio
-        logger.info(f"Extracting audio from {video_path}")
-        video = mp.VideoFileClip(video_path)
-        audio_path = video_path.replace('.mp4', '.wav')
-        video.audio.write_audiofile(audio_path, verbose=False, logger=None)
+        # Process video in memory
+        audio_data = process_video_in_memory(video_data)
 
         # Transcribe audio
-        transcription = transcribe_audio_with_whisper(audio_path)
-
-        # Clean up temporary files
-        video.close()
-        os.remove(audio_path)
-        logger.info(f"Temporary files cleaned up for video {url}")
+        transcription = transcribe_audio_with_whisper(audio_data)
 
         return {"URL": url, "Transcript": transcription}
     except Exception as e:
