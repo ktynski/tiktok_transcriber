@@ -1,118 +1,30 @@
 import streamlit as st
 import pandas as pd
-import json
 import os
-from urllib.request import Request, urlopen, urlretrieve
-from apify_client import ApifyClient
-import base64
-import requests
+import logging
+import moviepy.editor as mp
 import openai
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tenacity import retry, stop_after_attempt, wait_exponential
-import logging
-import moviepy.editor as mp
-import numpy as np
+import pyktok as pyk
+import re
+import glob
+
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Set OpenAI API key
 openai.api_key = st.secrets['OPENAI_API_KEY']
-APIFY_API_KEY = st.secrets['APIFY_API_KEY']
-
-a_client = ApifyClient(APIFY_API_KEY)
 
 # Set Streamlit page configuration
 st.set_page_config(page_title="TikTok Video Transcription", layout="wide")
 
-def flatten_dict(d, parent_key='', sep='_'):
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.extend(flatten_dict(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10))
-def fetch_video_metadata(keyword, num_videos, publish_time, extra_videos=2):
-    st.write(f"Fetching video metadata for keyword: {keyword}, num_videos: {num_videos}")
-    try:
-        with st.spinner("Fetching video metadata..."):
-            run_input = {
-                "keyword": keyword,
-                "limit": num_videos + extra_videos,
-                "sortType": 1,
-                "region": "US",
-                "publishTime": publish_time,
-                "proxyConfiguration": {"useApifyProxy": True},
-                "type": "SEARCH",
-            }
-            run = a_client.actor("nCNiU9QG1e0nMwgWj").call(run_input=run_input)
-            st.write(f"Apify actor run initiated: {run['id']}")
-            url = f'https://api.apify.com/v2/actor-runs/{run["id"]}?waitForFinish='
-
-            request = Request(url)
-            response_body = urlopen(request, timeout=60).read()
-            run_details = json.loads(response_body)
-            st.write(f"Apify run details received: {run_details.get('status')}")
-
-            if "defaultDatasetId" not in run:
-                st.write("No dataset ID found in the run details.")
-                st.error("No dataset ID found in the run details.")
-                return None
-
-            total_items = max(run_details.get("itemCount", 1), 1)
-            st.write(f"Total items in dataset: {total_items}")
-
-            items = list(a_client.dataset(run["defaultDatasetId"]).iterate_items())
-            if not items:
-                st.write("No items found in the dataset.")
-                st.warning("No items found in the dataset.")
-                return None
-
-            data = []
-            for idx, item in enumerate(items):
-                if isinstance(item, dict):
-                    flat_record = flatten_dict(item)
-                    data.append(flat_record)
-                else:
-                    st.write(f"Item {idx + 1} is not a dictionary and will be skipped.")
-                    st.warning(f"Item {idx + 1} is not a dictionary and will be skipped.")
-
-            df = pd.DataFrame(data)
-            df['original_index'] = df.index
-            st.write(f"Metadata fetched successfully. Total videos: {len(df)}")
-            return df.head(num_videos)
-    except Exception as e:
-        st.write(f"Error fetching video metadata: {e}")
-        st.error(f"Error fetching video metadata. Please try again.")
-        return None
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10))
-def download_video(video_url, video_path):
-    st.write(f"Attempting to download video from {video_url}")
-    try:
-        if video_url and isinstance(video_url, str):
-            response = requests.get(video_url, stream=True)
-            response.raise_for_status()
-            with open(video_path, 'wb') as file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    file.write(chunk)
-            if not os.path.exists(video_path):
-                raise FileNotFoundError(f"Failed to download video from {video_url}")
-            st.write(f"Video successfully downloaded to {video_path}")
-        else:
-            st.write(f"Invalid video URL: {video_url}")
-            raise ValueError(f"Invalid video URL: {video_url}")
-    except Exception as e:
-        st.write(f"Error downloading video: {e}")
-        raise e
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10))
 def transcribe_audio_with_whisper(audio_path):
-    st.write(f"Transcribing audio from {audio_path}")
+    logger.info(f"Transcribing audio from {audio_path}")
     try:
         with open(audio_path, "rb") as audio_file:
             transcript = openai.audio.transcriptions.create(
@@ -120,155 +32,98 @@ def transcribe_audio_with_whisper(audio_path):
                 file=audio_file,
                 response_format="text"
             )
-        st.write(f"Transcription completed for {audio_path}")
+        logger.info(f"Transcription completed for {audio_path}")
         return transcript
     except Exception as e:
-        st.write(f"Error transcribing audio with Whisper: {e}")
+        logger.error(f"Error transcribing audio with Whisper: {e}")
         return ""
 
-def get_video_url(video_data):
-    st.write(f"Extracting video URL for video {video_data['original_index']}")
-    video_url = video_data.get('aweme_info_video_download_addr_url_list')
-    
-    if isinstance(video_url, (list, np.ndarray)):
-        if len(video_url) > 0:
-            video_url = video_url[0]
-        else:
-            st.write(f"Empty video URL list for video {video_data['original_index']}")
-            return None
-    elif isinstance(video_url, str):
-        try:
-            parsed = json.loads(video_url)
-            if isinstance(parsed, list) and len(parsed) > 0:
-                video_url = parsed[0]
-        except json.JSONDecodeError:
-            pass  # Keep the original string if it's not valid JSON
-    elif pd.isna(video_url) or video_url is None:
-        st.write(f"Invalid video URL for video {video_data['original_index']}")
+def get_latest_video_file():
+    list_of_files = glob.glob('*.mp4')
+    if not list_of_files:
         return None
-    
-    if not isinstance(video_url, str):
-        st.write(f"Unexpected video URL type for video {video_data['original_index']}: {type(video_url)}")
-        return None
-    
-    st.write(f"Extracted video URL: {video_url}")
-    return video_url
+    latest_file = max(list_of_files, key=os.path.getctime)
+    return latest_file
 
-def process_video(video_data):
-    st.write(f"Processing video: {video_data['original_index']}")
+def download_and_process_video(url, browser_name='chrome'):
     try:
-        video_url = get_video_url(video_data)
-        if not video_url:
-            raise ValueError("Video URL not found or invalid.")
+        # Specify browser for Pyktok
+        pyk.specify_browser(browser_name)
 
-        video_path = f"video_{video_data['original_index']}.mp4"
+        # Download video using Pyktok
+        video_data_path = 'video_data.csv'
+        pyk.save_tiktok(url, True, video_data_path, browser_name)
         
-        # Download video
-        download_video(video_url, video_path)
+        # Determine video path based on the most recently created .mp4 file
+        video_path = get_latest_video_file()
         
-        if not os.path.exists(video_path):
-            raise FileNotFoundError(f"Video path does not exist after download: {video_path}")
+        if not video_path or not os.path.exists(video_path):
+            raise FileNotFoundError(f"Video file not found after download for URL: {url}")
 
         # Extract audio
-        try:
-            st.write(f"Extracting audio from {video_path}")
-            video = mp.VideoFileClip(video_path)
-            audio_path = f"audio_{video_data['original_index']}.wav"
-            video.audio.write_audiofile(audio_path, verbose=False, logger=None)
-            st.write(f"Audio extracted to {audio_path}")
-        except Exception as e:
-            st.write(f"Error extracting audio: {str(e)}")
-            raise
+        logger.info(f"Extracting audio from {video_path}")
+        video = mp.VideoFileClip(video_path)
+        audio_path = video_path.replace('.mp4', '.wav')
+        video.audio.write_audiofile(audio_path, verbose=False, logger=None)
 
         # Transcribe audio
         transcription = transcribe_audio_with_whisper(audio_path)
 
         # Clean up temporary files
         video.close()
-        os.remove(video_path)
         os.remove(audio_path)
-        st.write(f"Temporary files cleaned up for video {video_data['original_index']}")
+        logger.info(f"Temporary files cleaned up for video {url}")
 
-        st.write(f"Video processing completed for {video_data['original_index']}")
-        return {"URL": video_url, "Transcript": transcription}
+        return {"URL": url, "Transcript": transcription}
     except Exception as e:
-        st.write(f"Error processing video {video_data['original_index']}: {str(e)}")
-        st.write(f"Video data: {video_data}")
-        return {"URL": video_url if 'video_url' in locals() else "Unknown", "Transcript": f"Error: {str(e)}"}
+        logger.error(f"Error processing video {url}: {str(e)}")
+        return {"URL": url, "Transcript": f"Error: {str(e)}"}
 
-        
-def process_videos_concurrently(metadata_df):
-    st.write(f"Starting concurrent processing of {len(metadata_df)} videos")
+def process_videos_concurrently(urls, browser_name='chrome'):
+    logger.info(f"Starting concurrent processing of {len(urls)} videos")
     results = []
-    total_videos = len(metadata_df)
-    
+
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(process_video, row) for _, row in metadata_df.iterrows()]
-        
+        futures = [executor.submit(download_and_process_video, url, browser_name) for url in urls]
+
         for i, future in enumerate(as_completed(futures)):
             try:
                 result = future.result()
                 results.append(result)
-                st.write(f"Completed processing video {i+1}/{total_videos}")
+                logger.info(f"Completed processing video {i + 1}/{len(urls)}")
             except Exception as e:
-                st.write(f"Error processing video {i+1}/{total_videos}: {str(e)}")
-    
-    # Update progress outside of the thread
-    for i in range(total_videos):
-        st.progress((i + 1) / total_videos)
-    
-    st.write(f"Concurrent processing completed. Total results: {len(results)}")
+                logger.error(f"Error processing video {i + 1}/{len(urls)}: {str(e)}")
+
+    logger.info(f"Concurrent processing completed. Total results: {len(results)}")
     return results
 
 def main():
     st.title("TikTok Video Transcription")
-    st.markdown("Enter the keyword and number of videos to transcribe.")
+    st.markdown("Provide the TikTok URLs to transcribe.")
 
-    keyword = st.text_input("Keyword", value="")
-    num_videos = st.number_input("Number of Videos", min_value=1, max_value=100, value=3)
-    publish_time = st.selectbox("Publish Time", options=["WEEK", "MONTH", "YEAR"])
+    urls_input = st.text_area("TikTok URLs (one per line)", height=200)
+    urls = [url.strip() for url in urls_input.split('\n') if url.strip()]
 
     if st.button("Transcribe Videos"):
-        if not keyword.strip():
-            st.warning("Please enter a keyword.")
+        if not urls:
+            st.warning("Please enter at least one URL.")
             return
 
-        st.write(f"Starting transcription process for keyword: {keyword}, num_videos: {num_videos}")
-        metadata_df = fetch_video_metadata(keyword, num_videos, publish_time)
-        if metadata_df is None or metadata_df.empty:
-            st.write("No metadata retrieved or empty dataframe returned")
-            return
+        logger.info(f"Starting transcription process for {len(urls)} videos")
+        st.write(f"Processing {len(urls)} videos. This may take a while...")
 
-        st.subheader("Video Metadata")
-        relevant_columns = [
-            'aweme_info_desc',
-            'aweme_info_author_nickname',
-            'aweme_info_video_duration',
-            'aweme_info_statistics_play_count',
-            'original_index'
-        ]
-        display_names = {
-            'aweme_info_desc': 'Description',
-            'aweme_info_author_nickname': 'Author',
-            'aweme_info_video_duration': 'Duration',
-            'aweme_info_statistics_play_count': 'Play Count'
-        }
-        st.dataframe(metadata_df[relevant_columns].rename(columns=display_names))
-        st.write("Metadata displayed in Streamlit app")
-
-        st.write(f"Processing {len(metadata_df)} videos. This may take a while...")
-        transcripts = process_videos_concurrently(metadata_df)
+        transcripts = process_videos_concurrently(urls)
 
         if transcripts:
             df = pd.DataFrame(transcripts)
             st.subheader("Transcription Results")
             st.dataframe(df)
-            st.write("Transcription results displayed in Streamlit app")
+            logger.info("Transcription results displayed in Streamlit app")
         else:
             st.warning("No transcripts were generated. Please check the URLs and try again.")
-            st.write("No transcripts generated")
+            logger.warning("No transcripts generated")
 
 if __name__ == "__main__":
-    st.write("Application started")
+    logger.info("Application started")
     main()
-    st.write("Application finished")
+    logger.info("Application finished")
