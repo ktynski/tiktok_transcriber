@@ -21,6 +21,10 @@ openai.api_key = st.secrets['OPENAI_API_KEY']
 st.set_page_config(page_title="TikTok Video Transcriptionasdfasdf", layout="wide")
 
 
+if 'DBUS_SESSION_BUS_ADDRESS' not in os.environ:
+    os.environ['DBUS_SESSION_BUS_ADDRESS'] = 'unix:path=/run/user/1000/bus'
+
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10))
 def transcribe_audio_with_whisper(audio_path):
     logger.info(f"Transcribing audio from {audio_path}")
