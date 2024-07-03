@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pyktok as pyk
 import re
 import glob
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 # Set up logging
